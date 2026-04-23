@@ -1,0 +1,27 @@
+name: Auto Douyin Spark
+on:
+  schedule:
+    # 每天 北京时间 晚上20:00（晚8点整）自动运行，时区已全部换算完毕
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+      - name: Run auto script
+        env:
+          COOKIE: ${{ secrets.DOUYIN_COOKIE }}
+          FRIEND_UID: ${{ secrets.FRIEND_ID }}
+          SEND_MSG: ${{ secrets.SEND_CONTENT }}
+        run: |
+          python main.py
