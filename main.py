@@ -2,84 +2,100 @@ import requests
 import os
 import json
 import time
-import random  # 1. 引入 random 库，用于随机选择
+import random
 
-# 自动读取GitHub私密变量
+# ===== 环境变量 =====
 COOKIE = os.environ.get("COOKIE")
-# 多好友：这里会自动读取逗号隔开的所有好友ID
-FRIEND_UID_STR = os.environ.get("FRIEND_UID")
-# 读取所有备选内容（在GitHub Secrets中用英文逗号隔开）
-RAW_CONTENT_STR = os.environ.get("SEND_MSG") 
+FRIEND_UID_STR = os.environ.get("FRIEND_UID", "")
+SEND_CONTENT = os.environ.get("SEND_MSG", "")
 
-# 2. 处理随机内容逻辑
-# 将字符串按逗号分割成列表，并去除首尾空格
-content_list = [x.strip() for x in RAW_CONTENT_STR.split(",") if x.strip()]
-# 从列表中随机选择一个作为今天的发送内容
-SEND_CONTENT = random.choice(content_list) if content_list else "✨"
-
-# 分割字符串，拆分出每一个好友的UID
 FRIEND_UID_LIST = [uid.strip() for uid in FRIEND_UID_STR.split(",") if uid.strip()]
 
-# 抖音网页版官方接口基础配置
 BASE_URL = "https://www.douyin.com"
+
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
     "Cookie": COOKIE,
     "Referer": BASE_URL,
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9"
 }
 
-def get_ac_nonce():
-    # 全自动实时获取最新ac_nonce，永久解决cookie鉴权过期问题
-    resp = requests.get(BASE_URL, headers=HEADERS)
-    nonce = resp.cookies.get("ac_nonce", "")
-    print(f"✅ 成功获取最新ac_nonce: {nonce}")
-    return nonce
+# ===== 工具函数 =====
 
-def send_text_message(friend_uid):
-    # 给单个好友发送固定消息/表情，纯火花互动，无AI自动回复
-    nonce = get_ac_nonce()
+def human_sleep(a=3, b=10):
+    t = random.uniform(a, b)
+    print(f"⏱️ 等待 {t:.2f} 秒")
+    time.sleep(t)
+
+
+def safe_request(method, url, **kwargs):
+    for i in range(3):
+        try:
+            if method == "GET":
+                res = requests.get(url, timeout=10, **kwargs)
+            else:
+                res = requests.post(url, timeout=10, **kwargs)
+
+            if res.status_code == 200:
+                return res.json()
+            else:
+                print(f"⚠️ 状态码异常: {res.status_code}")
+
+        except Exception as e:
+            print(f"⚠️ 请求失败({i+1}/3): {e}")
+
+        time.sleep(random.randint(2, 6))
+    return None
+
+
+def get_ac_nonce():
+    print("🔐 获取 ac_nonce...")
+    res = requests.get(BASE_URL, headers=HEADERS)
+    return res.cookies.get("ac_nonce", "")
+
+
+# ===== 核心功能 =====
+
+def send_text_message(friend_uid, nonce):
     url = f"{BASE_URL}/aweme/v1/im/message/send/"
     data = {
         "to_user_id": friend_uid,
-        "content": SEND_CONTENT, # 这里会使用上面随机选出的内容
+        "content": SEND_CONTENT,
         "ac_nonce": nonce,
     }
-    res = requests.post(url, headers=HEADERS, data=data)
-    result = res.json()
-    print(f"\n===== 给好友【{friend_uid}】发送内容: {SEND_CONTENT} =====")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    if result.get("status_code") == 0:
-        print(f"🎉 好友{friend_uid} 消息发送成功，火花互动触发完成！")
-        return True
-    else:
-        print(f"❌ 好友{friend_uid} 消息发送失败")
-        print("失败原因：", result.get("status_msg", "未知错误"))
-        return False
 
-def get_user_latest_video(friend_uid):
-    # 获取单个好友最新发布的作品视频
-    nonce = get_ac_nonce()
+    result = safe_request("POST", url, headers=HEADERS, data=data)
+
+    print(f"\n📨 发消息 → {friend_uid}")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    return result and result.get("status_code") == 0
+
+
+def get_latest_video(friend_uid, nonce):
     url = f"{BASE_URL}/aweme/v1/user/post/aweme/"
     params = {
         "user_id": friend_uid,
         "count": 1,
         "ac_nonce": nonce
     }
-    res = requests.get(url, headers=HEADERS, params=params)
-    data = res.json()
-    if data.get("status_code") != 0 or not data.get("aweme_list"):
-        print(f"❌ 好友{friend_uid} 未获取到最新视频")
+
+    result = safe_request("GET", url, headers=HEADERS, params=params)
+
+    if not result or not result.get("aweme_list"):
+        print(f"❌ 未获取到视频: {friend_uid}")
         return None
-    latest_aweme = data["aweme_list"][0]
-    aweme_id = latest_aweme["aweme_id"]
-    print(f"✅ 好友{friend_uid} 获取到最新视频ID: {aweme_id}")
+
+    aweme_id = result["aweme_list"][0]["aweme_id"]
+    print(f"🎬 获取视频ID: {aweme_id}")
     return aweme_id
 
-def send_video_card(friend_uid, aweme_id):
-    # 把单个好友最新视频转发到私信
+
+def send_video(friend_uid, aweme_id, nonce):
     if not aweme_id:
         return False
-    nonce = get_ac_nonce()
+
     url = f"{BASE_URL}/aweme/v1/im/message/send/"
     data = {
         "to_user_id": friend_uid,
@@ -87,33 +103,45 @@ def send_video_card(friend_uid, aweme_id):
         "content": "分享作品",
         "ac_nonce": nonce,
     }
-    res = requests.post(url, headers=HEADERS, data=data)
-    result = res.json()
-    print(f"\n===== 好友【{friend_uid}】视频转发结果 =====")
+
+    result = safe_request("POST", url, headers=HEADERS, data=data)
+
+    print(f"\n📤 转发视频 → {friend_uid}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    if result.get("status_code") == 0:
-        print(f"🎉 好友{friend_uid} 最新视频转发私信成功！")
-        return True
-    else:
-        print(f"❌ 好友{friend_uid} 视频转发失败")
-        print("失败原因：", result.get("status_msg", "未知错误"))
-        return False
+
+    return result and result.get("status_code") == 0
+
+
+# ===== 主流程 =====
 
 if __name__ == "__main__":
-    print("===== 抖音多好友自动续火脚本启动 =====")
-    print(f"本次待执行任务好友总数：{len(FRIEND_UID_LIST)} 个")
-    print(f"今日随机池内容: {content_list}")
-    print(f"🎲 系统抽取结果: {SEND_CONTENT}")
-    print("-"*50)
-    # 循环遍历你填写的每一个好友，逐个执行全部任务
-    for friend_uid in FRIEND_UID_LIST:
-        print(f"\n>>>>>>>>>> 开始处理好友：{friend_uid}")
-        time.sleep(1)
-        send_text_message(friend_uid)
-        time.sleep(2)
-        vid = get_user_latest_video(friend_uid)
-        send_video_card(friend_uid, vid)
-        print(f"\n========== 好友 {friend_uid} 全部任务完成 ==========")
-        time.sleep(3) # 好友之间加间隔，避免接口风控限制
-    print("\n" + "="*60)
-    print("✅ 全部好友 每日自动任务全部执行完毕！")
+    print("🚀 自动任务启动")
+    print(f"👥 好友数量: {len(FRIEND_UID_LIST)}")
+
+    if not COOKIE:
+        print("❌ COOKIE 未设置，终止")
+        exit()
+
+    nonce = get_ac_nonce()
+    if not nonce:
+        print("❌ 获取 nonce 失败")
+        exit()
+
+    for uid in FRIEND_UID_LIST:
+        print(f"\n====== 处理好友 {uid} ======")
+
+        human_sleep()
+
+        send_text_message(uid, nonce)
+
+        human_sleep()
+
+        vid = get_latest_video(uid, nonce)
+
+        human_sleep()
+
+        send_video(uid, vid, nonce)
+
+        human_sleep(5, 15)
+
+    print("\n✅ 全部任务完成")
