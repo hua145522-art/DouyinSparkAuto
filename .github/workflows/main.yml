@@ -1,9 +1,13 @@
 name: Auto Douyin Spark
 on:
   schedule:
-    # 每天 北京时间 晚上20:00（晚8点整）自动运行，时区已全部换算完毕
+    # 每天 北京时间 晚上20:00（晚8点整）自动运行，时区已换算完毕
     - cron: '0 12 * * *'
   workflow_dispatch:
+
+# 【核心新增：强制全局使用Node.js 24】
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   run:
@@ -21,7 +25,7 @@ jobs:
       - name: Run auto script
         env:
           COOKIE: ${{ secrets.DOUYIN_COOKIE }}
-          FRIEND_UID: ${{ secrets.FRIEND_ID }}
-          SEND_MSG: ${{ secrets.SEND_CONTENT }}
+          FRIEND_ID: ${{ secrets.FRIEND_ID }}
+          SEND_MSG: ${{ secrets.SEND_MSG }}
         run: |
-          python main.py
+          python .github/workflows/main.py
